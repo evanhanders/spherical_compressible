@@ -31,13 +31,13 @@ logger = logging.getLogger(__name__)
 
 # Parameters
 Ri, Ro, Ro2 = 1, 2, 3
-Nphi, Ntheta, Nr = 1, 16, 16 
-Rayleigh = 3500
+Nphi, Ntheta, Nr = 64, 32, 32
+Rayleigh = 1e4
 Prandtl = 1
 dealias = 3/2
 timestepper = d3.SBDF2
 dtype = np.float64
-mesh = None
+mesh = [16,16]
 
 # Bases
 coords = d3.SphericalCoordinates('phi', 'theta', 'r')
@@ -119,6 +119,8 @@ viscous_diffusion_L = nu*(d3.div(sigma) + d3.dot(sigma, grad_ln_rho0))
 viscous_diffusion_R = nu*d3.dot(sigma, d3.grad(ln_rho1))
 VH = 2 * nu * (d3.trace(d3.dot(E,E)) - (1/3)*div_u*div_u)
 
+thermal_diffusion_L = gamma*kappa*(d3.lap(T1) + d3.dot(d3.grad(T1), grad_ln_rho0))
+thermal_diffusion_R = gamma*kappa*(d3.dot(d3.grad(T1), d3.grad(ln_rho1)))
 
 B2_grad_u = d3.grad(B2_u)
 B2_div_u = d3.div(B2_u)
@@ -147,20 +149,32 @@ B2_dS0_dr['g'][2] = -epsilon
 B2_grad_ln_rho0['g'][2] = ((-1/R)*B2_dS0_dr['g'][2] + (1/(gamma-1)) * B2_grad_ln_T0['g'][2])
 
 
+B2_thermal_diffusion_L = gamma*kappa*(d3.lap(B2_T1) + d3.dot(d3.grad(B2_T1), B2_grad_ln_rho0))
+B2_thermal_diffusion_R = gamma*kappa*(d3.dot(d3.grad(B2_T1), d3.grad(B2_ln_rho1)))
 
 
 # Problem
 problem = d3.IVP([ln_rho1, T1, u, B2_ln_rho1, B2_T1, B2_u, tau_T1, tau_T2, tau_u1, tau_u2, B2_tau_T1, B2_tau_T2, B2_tau_u1, B2_tau_u2], namespace=locals())
 problem.add_equation("dt(ln_rho1) + div_u + u@grad_ln_rho0 + (1/nu)*rvec@lift(tau_u2, -1) = -u@grad(ln_rho1)")
-problem.add_equation("dt(T1) + T0*(gamma-1)*div_u + dot(u, grad_T0) - kappa*lap(T1) + lift(tau_T1, -1) + lift(tau_T2, -2) = - u@grad(T1) - T1*(gamma-1)*div_u + (1/Cv)*VH")
+problem.add_equation("dt(T1) + T0*(gamma-1)*div_u + dot(u, grad_T0) - thermal_diffusion_L + lift(tau_T1, -1) + lift(tau_T2, -2) = - u@grad(T1) - T1*(gamma-1)*div_u + (1/Cv)*VH + thermal_diffusion_R")
 problem.add_equation("dt(u) - viscous_diffusion_L + R*(grad(T1) + T1*grad_ln_rho0 + T0*grad(ln_rho1)) + lift(tau_u1, -1) + lift(tau_u2, -2) = - u@grad(u) + -R*T1*grad(ln_rho1) + viscous_diffusion_R")
 problem.add_equation("dt(B2_ln_rho1) + B2_div_u + B2_u@B2_grad_ln_rho0 + (1/nu)*B2_rvec@B2_lift(B2_tau_u2, -1) = -B2_u@grad(B2_ln_rho1)")
-problem.add_equation("dt(B2_T1) + B2_T0*(gamma-1)*B2_div_u + dot(B2_u, B2_grad_T0) - kappa*lap(B2_T1) + B2_lift(B2_tau_T1, -1) + B2_lift(B2_tau_T2, -2) = - B2_u@grad(B2_T1) - B2_T1*(gamma-1)*B2_div_u + (1/Cv)*B2_VH")
+problem.add_equation("dt(B2_T1) + B2_T0*(gamma-1)*B2_div_u + dot(B2_u, B2_grad_T0) - B2_thermal_diffusion_L + B2_lift(B2_tau_T1, -1) + B2_lift(B2_tau_T2, -2) = - B2_u@grad(B2_T1) - B2_T1*(gamma-1)*B2_div_u + (1/Cv)*B2_VH + B2_thermal_diffusion_R")
 problem.add_equation("dt(B2_u) - B2_viscous_diffusion_L + R*(grad(B2_T1) + B2_T1*B2_grad_ln_rho0 + B2_T0*grad(B2_ln_rho1)) + B2_lift(B2_tau_u1, -1) + B2_lift(B2_tau_u2, -2) = - B2_u@grad(B2_u) + -R*B2_T1*grad(B2_ln_rho1) + B2_viscous_diffusion_R")
+#problem.add_equation("dt(ln_rho1) + div_u + u@grad_ln_rho0 + rvec@lift(tau_u2, -1) = -u@grad(ln_rho1)")
+#problem.add_equation("dt(T1) + T0*(gamma-1)*div_u + dot(u, grad_T0) - kappa*lap(T1) + lift(tau_T1, -1) + kappa*lift(tau_T2, -2) = - u@grad(T1) - T1*(gamma-1)*div_u + (1/Cv)*VH")
+#problem.add_equation("dt(u) - viscous_diffusion_L + R*(grad(T1) + T1*grad_ln_rho0 + T0*grad(ln_rho1)) + lift(tau_u1, -1) + nu*lift(tau_u2, -2) = - u@grad(u) + -R*T1*grad(ln_rho1) + viscous_diffusion_R")
+#problem.add_equation("dt(B2_ln_rho1) + B2_div_u + B2_u@B2_grad_ln_rho0 + B2_rvec@B2_lift(B2_tau_u2, -1) = -B2_u@grad(B2_ln_rho1)")
+#problem.add_equation("dt(B2_T1) + B2_T0*(gamma-1)*B2_div_u + dot(B2_u, B2_grad_T0) - kappa*lap(B2_T1) + B2_lift(B2_tau_T1, -1) + kappa*B2_lift(B2_tau_T2, -2) = - B2_u@grad(B2_T1) - B2_T1*(gamma-1)*B2_div_u + (1/Cv)*B2_VH")
+#problem.add_equation("dt(B2_u) - B2_viscous_diffusion_L + R*(grad(B2_T1) + B2_T1*B2_grad_ln_rho0 + B2_T0*grad(B2_ln_rho1)) + B2_lift(B2_tau_u1, -1) + nu*B2_lift(B2_tau_u2, -2) = - B2_u@grad(B2_u) + -R*B2_T1*grad(B2_ln_rho1) + B2_viscous_diffusion_R")
+
 problem.add_equation("T1(r=Ri) = 0")
-problem.add_equation("u(r=Ri) = 0")
+problem.add_equation("radial(u(r=Ri)) = 0")
+problem.add_equation("angular(radial(E(r=Ri))) = 0")
+
 problem.add_equation("B2_T1(r=Ro2) = 0")
-problem.add_equation("B2_u(r=Ro2) = 0")
+problem.add_equation("radial(B2_u(r=Ro2)) = 0")
+problem.add_equation("angular(radial(B2_E(r=Ro2))) = 0")
 
 problem.add_equation("T1(r=Ro) - B2_T1(r=Ro) = 0")
 problem.add_equation("u(r=Ro) - B2_u(r=Ro) = 0")
@@ -182,8 +196,14 @@ B2_T1['g'] *= (B2_r - Ro) * (Ro2 - B2_r) # Damp noise at walls
 snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=10*t_buoy, max_writes=10)
 snapshots.add_task(T1(theta=np.pi/2), name='T1_eq')
 snapshots.add_task(T1(phi=0), name='T1(phi=0)')
+snapshots.add_task(T1(phi=np.pi), name='T1(phi=pi)')
+snapshots.add_task(u(phi=0), name='u(phi=0)')
+snapshots.add_task(u(phi=np.pi), name='u(phi=pi)')
 snapshots.add_task(B2_T1(theta=np.pi/2), name='B2_T1_eq')
 snapshots.add_task(B2_T1(phi=0), name='B2_T1(phi=0)')
+snapshots.add_task(B2_T1(phi=np.pi), name='B2_T1(phi=pi)')
+snapshots.add_task(B2_u(phi=0), name='B2_u(phi=0)')
+snapshots.add_task(B2_u(phi=np.pi), name='B2_u(phi=pi)')
 
 
 # CFL

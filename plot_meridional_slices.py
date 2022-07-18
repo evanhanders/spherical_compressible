@@ -48,10 +48,8 @@ plotter_kwargs = { 'col_inch' : int(args['--col_inch']), 'row_inch' : int(args['
 # divide_x_mean divides the radial mean(abs(T eq)) over the phi direction
 plotter.setup_grid(num_rows=2, num_cols=2, polar=True, **plotter_kwargs)
 kwargs = {'radial_basis' : 'r', 'colatitude_basis' : 'theta', 'r_inner' : r_inner, 'r_outer' : r_outer, 'r_stitch' : r_stitch}
-#plotter.add_meridional_colormesh(left='T1(phi=0)',  right='T1(phi=0)', remove_x_mean=False, divide_x_mean=False, **kwargs)
-plotter.add_shell_shell_meridional_colormesh(left=('T1(phi=0)', 'B2_T1(phi=0)'), right=('T1(phi=0)', 'B2_T1(phi=0)'), **kwargs)
-#plotter.add_polar_colormesh('equator(s1_B)', remove_x_mean=True, divide_x_mean=True, **kwargs)
-#plotter.add_polar_colormesh('equator(u_B)', vector_ind=0, cmap='PuOr_r', **kwargs)
-#plotter.add_polar_colormesh('equator(u_B)', vector_ind=1, cmap='PuOr_r', **kwargs)
-#plotter.add_polar_colormesh('equator(u_B)', vector_ind=2, cmap='PuOr_r', **kwargs)
+plotter.add_shell_shell_meridional_colormesh(left=('T1(phi=pi)', 'B2_T1(phi=pi)'), right=('T1(phi=0)', 'B2_T1(phi=0)'), remove_x_mean=True, **kwargs)
+plotter.add_shell_shell_meridional_colormesh(left=('u(phi=pi)', 'B2_u(phi=pi)'), right=('u(phi=0)', 'B2_u(phi=0)'), vector_ind=0, cmap='PuOr_r', **kwargs)
+plotter.add_shell_shell_meridional_colormesh(left=('u(phi=pi)', 'B2_u(phi=pi)'), right=('u(phi=0)', 'B2_u(phi=0)'), vector_ind=1, cmap='PuOr_r', **kwargs)
+plotter.add_shell_shell_meridional_colormesh(left=('u(phi=pi)', 'B2_u(phi=pi)'), right=('u(phi=0)', 'B2_u(phi=0)'), vector_ind=2, cmap='PuOr_r', **kwargs)
 plotter.plot_colormeshes(start_fig=start_fig, dpi=int(args['--dpi']))
