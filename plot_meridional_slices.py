@@ -36,7 +36,8 @@ if n_files is not None:
     n_files = int(n_files)
 
 r_inner = 1
-r_outer = 2
+r_stitch = 2
+r_outer = 3
 
 # Create Plotter object, tell it which fields to plot
 plotter = SlicePlotter(root_dir, data_dir, fig_name, start_file=start_file, n_files=n_files)
@@ -46,8 +47,9 @@ plotter_kwargs = { 'col_inch' : int(args['--col_inch']), 'row_inch' : int(args['
 # remove_x_mean option removes the (numpy horizontal mean) over phi
 # divide_x_mean divides the radial mean(abs(T eq)) over the phi direction
 plotter.setup_grid(num_rows=2, num_cols=2, polar=True, **plotter_kwargs)
-kwargs = {'radial_basis' : 'r', 'colatitude_basis' : 'theta', 'r_inner' : r_inner, 'r_outer' : r_outer}
-plotter.add_meridional_colormesh(left='T1(phi=0)',  right='T1(phi=0)', remove_x_mean=False, divide_x_mean=False, **kwargs)
+kwargs = {'radial_basis' : 'r', 'colatitude_basis' : 'theta', 'r_inner' : r_inner, 'r_outer' : r_outer, 'r_stitch' : r_stitch}
+#plotter.add_meridional_colormesh(left='T1(phi=0)',  right='T1(phi=0)', remove_x_mean=False, divide_x_mean=False, **kwargs)
+plotter.add_shell_shell_meridional_colormesh(left=('T1(phi=0)', 'B2_T1(phi=0)'), right=('T1(phi=0)', 'B2_T1(phi=0)'), **kwargs)
 #plotter.add_polar_colormesh('equator(s1_B)', remove_x_mean=True, divide_x_mean=True, **kwargs)
 #plotter.add_polar_colormesh('equator(u_B)', vector_ind=0, cmap='PuOr_r', **kwargs)
 #plotter.add_polar_colormesh('equator(u_B)', vector_ind=1, cmap='PuOr_r', **kwargs)

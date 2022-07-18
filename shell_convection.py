@@ -97,10 +97,11 @@ er = dist.VectorField(coords, bases=basis.radial_basis)
 er['g'][2] = 1
 rvec = dist.VectorField(coords, bases=basis.radial_basis)
 rvec['g'][2] = r
+B2_phi, B2_theta, B2_r = dist.local_grids(basis2)
 B2_er = dist.VectorField(coords, bases=basis2.radial_basis)
 B2_er['g'][2] = 1
 B2_rvec = dist.VectorField(coords, bases=basis2.radial_basis)
-B2_rvec['g'][2] = r
+B2_rvec['g'][2] = B2_r
 
 lift_basis = basis.derivative_basis(2)
 lift = lambda A, n: d3.Lift(A, lift_basis, n)
@@ -139,7 +140,7 @@ grad_ln_rho0['g'][2] = ((-1/R)*dS0_dr['g'][2] + (1/(gamma-1)) * grad_ln_T0['g'][
 
 #solve for hydrostatic equilibrium background state
 #assume g_vec = -r
-B2_T0['g'] = -1*r + (Cp/epsilon)
+B2_T0['g'] = -1*B2_r + (Cp/epsilon)
 B2_grad_T0['g'][2] = -1
 B2_grad_ln_T0['g'][2] = -1 / B2_T0['g']
 B2_dS0_dr['g'][2] = -epsilon
@@ -149,14 +150,23 @@ B2_grad_ln_rho0['g'][2] = ((-1/R)*B2_dS0_dr['g'][2] + (1/(gamma-1)) * B2_grad_ln
 
 
 # Problem
-problem = d3.IVP([ln_rho1, T1, u, tau_T1, tau_T2, tau_u1, tau_u2], namespace=locals())
+problem = d3.IVP([ln_rho1, T1, u, B2_ln_rho1, B2_T1, B2_u, tau_T1, tau_T2, tau_u1, tau_u2, B2_tau_T1, B2_tau_T2, B2_tau_u1, B2_tau_u2], namespace=locals())
 problem.add_equation("dt(ln_rho1) + div_u + u@grad_ln_rho0 + (1/nu)*rvec@lift(tau_u2, -1) = -u@grad(ln_rho1)")
 problem.add_equation("dt(T1) + T0*(gamma-1)*div_u + dot(u, grad_T0) - kappa*lap(T1) + lift(tau_T1, -1) + lift(tau_T2, -2) = - u@grad(T1) - T1*(gamma-1)*div_u + (1/Cv)*VH")
 problem.add_equation("dt(u) - viscous_diffusion_L + R*(grad(T1) + T1*grad_ln_rho0 + T0*grad(ln_rho1)) + lift(tau_u1, -1) + lift(tau_u2, -2) = - u@grad(u) + -R*T1*grad(ln_rho1) + viscous_diffusion_R")
-problem.add_equation("T1(r=Ri) = 1")
+problem.add_equation("dt(B2_ln_rho1) + B2_div_u + B2_u@B2_grad_ln_rho0 + (1/nu)*B2_rvec@B2_lift(B2_tau_u2, -1) = -B2_u@grad(B2_ln_rho1)")
+problem.add_equation("dt(B2_T1) + B2_T0*(gamma-1)*B2_div_u + dot(B2_u, B2_grad_T0) - kappa*lap(B2_T1) + B2_lift(B2_tau_T1, -1) + B2_lift(B2_tau_T2, -2) = - B2_u@grad(B2_T1) - B2_T1*(gamma-1)*B2_div_u + (1/Cv)*B2_VH")
+problem.add_equation("dt(B2_u) - B2_viscous_diffusion_L + R*(grad(B2_T1) + B2_T1*B2_grad_ln_rho0 + B2_T0*grad(B2_ln_rho1)) + B2_lift(B2_tau_u1, -1) + B2_lift(B2_tau_u2, -2) = - B2_u@grad(B2_u) + -R*B2_T1*grad(B2_ln_rho1) + B2_viscous_diffusion_R")
+problem.add_equation("T1(r=Ri) = 0")
 problem.add_equation("u(r=Ri) = 0")
-problem.add_equation("T1(r=Ro) = 0")
-problem.add_equation("u(r=Ro) = 0")
+problem.add_equation("B2_T1(r=Ro2) = 0")
+problem.add_equation("B2_u(r=Ro2) = 0")
+
+problem.add_equation("T1(r=Ro) - B2_T1(r=Ro) = 0")
+problem.add_equation("u(r=Ro) - B2_u(r=Ro) = 0")
+problem.add_equation("angular(radial(sigma(r=Ro) - B2_sigma(r=Ro)))= 0")
+problem.add_equation("ln_rho1(r=Ro) - B2_ln_rho1(r=Ro) =  0")
+problem.add_equation("radial(grad(T1)(r=Ro) - grad(B2_T1)(r=Ro)) = 0")
 
 # Solver
 solver = problem.build_solver(timestepper)
@@ -165,21 +175,27 @@ solver.stop_sim_time = stop_sim_time
 # Initial conditions
 T1.fill_random('g', seed=42, distribution='normal', scale=1e-3) # Random noise
 T1['g'] *= (r - Ri) * (Ro - r) # Damp noise at walls
+B2_T1.fill_random('g', seed=42, distribution='normal', scale=1e-3) # Random noise
+B2_T1['g'] *= (B2_r - Ro) * (Ro2 - B2_r) # Damp noise at walls
 
 # Analysis
 snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=10*t_buoy, max_writes=10)
 snapshots.add_task(T1(theta=np.pi/2), name='T1_eq')
 snapshots.add_task(T1(phi=0), name='T1(phi=0)')
+snapshots.add_task(B2_T1(theta=np.pi/2), name='B2_T1_eq')
+snapshots.add_task(B2_T1(phi=0), name='B2_T1(phi=0)')
 
 
 # CFL
 CFL = d3.CFL(solver, initial_dt=max_timestep, cadence=10, safety=2, threshold=0.1,
              max_change=1.5, min_change=0.5, max_dt=max_timestep)
 CFL.add_velocity(u)
+CFL.add_velocity(B2_u)
 
 # Flow properties
 flow = d3.GlobalFlowProperty(solver, cadence=10)
 flow.add_property(np.sqrt(u@u)/nu, name='Re')
+flow.add_property(np.sqrt(B2_u@B2_u)/nu, name='B2_Re')
 
 # Main loop
 try:
@@ -189,7 +205,8 @@ try:
         solver.step(timestep)
         if (solver.iteration-1) % 10 == 0:
             max_Re = flow.max('Re')
-            logger.info('Iteration=%i, Time=%e, dt=%e, max(Re)=%f' %(solver.iteration, solver.sim_time, timestep, max_Re))
+            B2_max_Re = flow.max('B2_Re')
+            logger.info('Iteration=%i, Time=%e, dt=%e, max(Re)=%f' %(solver.iteration, solver.sim_time, timestep, np.max((max_Re, B2_max_Re))))
 except:
     logger.error('Exception raised, triggering end of main loop.')
     raise
