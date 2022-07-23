@@ -47,8 +47,9 @@ plotter_kwargs = { 'col_inch' : int(args['--col_inch']), 'row_inch' : int(args['
 # divide_x_mean divides the radial mean(abs(T eq)) over the phi direction
 plotter.setup_grid(num_rows=2, num_cols=2, polar=True, **plotter_kwargs)
 kwargs = {'radial_basis' : 'r', 'colatitude_basis' : 'theta', 'r_inner' : r_inner, 'r_outer' : r_outer}
-plotter.add_meridional_colormesh(left='s1(phi=pi)', right='s1(phi=0)', remove_x_mean=True, **kwargs)
+plotter.add_meridional_colormesh(left='s1(phi=pi)', right='s1(phi=0)', remove_x_mean=False, **kwargs)
 plotter.add_meridional_colormesh(left='u(phi=pi)', right='u(phi=0)', vector_ind=0, cmap='PuOr_r', **kwargs)
 plotter.add_meridional_colormesh(left='u(phi=pi)', right='u(phi=0)', vector_ind=1, cmap='PuOr_r', **kwargs)
 plotter.add_meridional_colormesh(left='u(phi=pi)', right='u(phi=0)', vector_ind=2, cmap='PuOr_r', **kwargs)
+#plotter.add_meridional_colormesh(left='HSE(phi=pi)', right='HSE(phi=0)', vector_ind=2, cmap='PiYG_r', **kwargs)
 plotter.plot_colormeshes(start_fig=start_fig, dpi=int(args['--dpi']))

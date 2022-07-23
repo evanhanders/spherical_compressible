@@ -43,7 +43,7 @@ def zero_to_one(*args, **kwargs):
 Ro = 1
 Nphi, Ntheta, Nr = 1, 16, 16
 #Nphi, Ntheta, Nr = 1, 32, 32
-Rayleigh = 1e4
+Rayleigh = 1e3
 Prandtl = 1
 dealias = 3/2
 timestepper = d3.SBDF2
@@ -107,20 +107,12 @@ div_u = d3.div(u)
 
 
 #Analytical background state
-#assume g_vec = -r & T = 1 at outer boundary.
-A = -1/2
-B = 3
-T_func = lambda r: A * r**2 + B
-grad_T_func = lambda r: 2 * A * r
-grad_ln_T_func = lambda r: grad_T_func(r)/T_func(r)
-grad_ln_rho_func = lambda r: (1/(gamma-1)) * grad_ln_T_func(r)
-rho_func = lambda r: T_func(r)**(1/(gamma-1))
-
+#assume g_vec = -r & T = rho = 1 at outer boundary.
 pom_c = 1 + (gamma-1)/(2*gamma)
 
 g['g'][2] = -r
 grad_s0['g'][2] = 0
-grad_pom0['g'] = (gamma-1)/(gamma) * g['g']
+grad_pom0['g'][2] = (gamma-1)/(gamma) * g['g'][2]
 pom0['g'] = pom_c - (gamma-1)/(gamma) * r**2/2
 grad_ln_pom0 = (grad_pom0/pom0).evaluate()
 grad_ln_rho0 = ((1/(gamma-1)) * grad_ln_pom0).evaluate()
@@ -129,8 +121,8 @@ ln_rho0 = np.log(rho0).evaluate()
 inv_pom0 = (1/pom0).evaluate()
 
 
-pom1_over_pom0 = gamma*(s1/Cp + (gamma-1/gamma)*ln_rho1)
-grad_pom1_over_pom0 = gamma*(grad_s1/Cp + (gamma-1/gamma)*grad_ln_rho1)
+pom1_over_pom0 = gamma*(s1/Cp + ((gamma-1)/gamma)*ln_rho1)
+grad_pom1_over_pom0 = gamma*(grad_s1/Cp + ((gamma-1)/gamma)*grad_ln_rho1)
 pom1 = pom0*pom1_over_pom0
 grad_pom1 = grad_pom0*pom1_over_pom0 + pom0*grad_pom1_over_pom0
 pom_fluc_over_pom0 = np.exp(pom1_over_pom0) - (1 + pom1_over_pom0)
@@ -140,7 +132,7 @@ pom_full = ones*pom0 + pom1 + pom_fluc
 rho_full = rho0*np.exp(ln_rho1)
 
 #Momentum terms
-
+background_HSE = gamma*pom0*(grad_ln_rho0 + grad_s0/Cp) - g
 linear_HSE = gamma*pom0*(grad_ln_rho1 + grad_s1/Cp) + g * pom1_over_pom0
 nonlinear_HSE = gamma*(pom1 + pom_fluc)*(grad_ln_rho1 + grad_s1/Cp) + g*pom_fluc_over_pom0
 
@@ -151,23 +143,26 @@ viscous_diffusion_R = nu*d3.dot(sigma, d3.grad(ln_rho1))
 VH = 2 * nu * (d3.trace(d3.dot(E,E)) - (1/3)*div_u*div_u)
 
 #Thermal terms
-#Entropy diffusion
-thermal_diffusion_L = chi*(d3.lap(s1) + grad_s1@(grad_ln_pom0 + grad_ln_rho0))
-thermal_diffusion_R = chi*(R/(rho_full*pom_full))*d3.div(rho_full*pom_full*grad_s1) - thermal_diffusion_L
+##simple
+#thermal_diffusion_L = chi*d3.lap(s1)
+#thermal_diffusion_R = 0
+##Entropy diffusion
+#thermal_diffusion_L = chi*(d3.lap(s1) + grad_s1@(grad_ln_pom0 + grad_ln_rho0))
+#thermal_diffusion_R = chi*(R/(rho_full*pom_full))*d3.div(rho_full*pom_full*grad_s1) - thermal_diffusion_L
 #Temperature diffusion
-#thermal_diffusion_L = (gamma/(gamma-1))*chi*(d3.div(grad_pom1*inv_pom0) + (grad_pom1*inv_pom0)@(grad_ln_rho0 + grad_ln_pom0))
-#thermal_diffusion_R = (gamma/(gamma-1))*chi*(R/(rho_full*pom_full))*d3.div(rho_full*(grad_pom1 + d3.grad(pom_fluc))) - thermal_diffusion_L
+thermal_diffusion_L = (gamma/(gamma-1))*chi*(d3.div(grad_pom1*inv_pom0) + (grad_pom1*inv_pom0)@(grad_ln_rho0 + grad_ln_pom0))
+thermal_diffusion_R = (gamma/(gamma-1))*chi*(R/(rho_full*pom_full))*d3.div(rho_full*(grad_pom1 + d3.grad(pom_fluc))) - thermal_diffusion_L
 
 HSE = linear_HSE + nonlinear_HSE
 
-Q['g'] = chi*10*epsilon*one_to_zero(r, 0.7*Ro, width=0.1*Ro)
+Q['g'] = chi*10*epsilon
 
 
 # Problem
 problem = d3.IVP([ln_rho1, s1, u, tau_s1, tau_u1, ], namespace=locals())
 problem.add_equation("dt(ln_rho1) + div_u + u@grad_ln_rho0 = -u@grad(ln_rho1)")
 problem.add_equation("dt(s1) + dot(u, grad_s0) - thermal_diffusion_L + lift(tau_s1) = - u@grad(s1) + thermal_diffusion_R + (R/(rho_full*pom_full))*(Q + VH)")
-problem.add_equation("dt(u) - viscous_diffusion_L - linear_HSE + lift(tau_u1) = - u@grad(u) + nonlinear_HSE + viscous_diffusion_R")
+problem.add_equation("dt(u) - viscous_diffusion_L + linear_HSE + lift(tau_u1) = - u@grad(u) - nonlinear_HSE + viscous_diffusion_R")
 
 problem.add_equation("s1(r=Ro) = 0")
 problem.add_equation("radial(u(r=Ro)) = 0")
@@ -189,8 +184,8 @@ snapshots.add_task(s1(phi=np.pi), name='s1(phi=pi)')
 snapshots.add_task(u(phi=0), name='u(phi=0)')
 snapshots.add_task(u(phi=np.pi), name='u(phi=pi)')
 snapshots.add_task(u(theta=np.pi/2), name='u_eq')
-snapshots.add_task((HSE)(phi=0), name='linear_HSE(phi=0)')
-snapshots.add_task((HSE)(phi=np.pi), name='linear_HSE(phi=pi)')
+snapshots.add_task((linear_HSE)(phi=0), name='HSE(phi=0)')
+snapshots.add_task((linear_HSE)(phi=np.pi), name='HSE(phi=pi)')
 
 
 # CFL
@@ -201,6 +196,8 @@ CFL.add_velocity(u)
 # Flow properties
 flow = d3.GlobalFlowProperty(solver, cadence=1)
 flow.add_property(np.sqrt(u@u)/nu, name='Re')
+
+EOS = (grad_s0*ones + grad_s1)/Cp - ((1/gamma)*d3.grad(np.log(pom0*ones + pom1 + pom_fluc)) - ((gamma-1)/(gamma))*(grad_ln_rho0*ones + grad_ln_rho1))
 
 # Main loop
 try:
