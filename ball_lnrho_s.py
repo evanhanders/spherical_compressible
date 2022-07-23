@@ -142,7 +142,7 @@ rho_full = rho0*np.exp(ln_rho1)
 #Momentum terms
 
 linear_HSE = gamma*pom0*(grad_ln_rho1 + grad_s1/Cp) + g * pom1_over_pom0
-nonlinear_HSE = 0#gamma*(pom1 + pom_fluc)*(grad_ln_rho1 + grad_s1/Cp) + g*pom_fluc_over_pom0
+nonlinear_HSE = gamma*(pom1 + pom_fluc)*(grad_ln_rho1 + grad_s1/Cp) + g*pom_fluc_over_pom0
 
 E = 0.5*(grad_u + d3.trans(grad_u))
 sigma = 2*(E - (1/3)*div_u*eye)
