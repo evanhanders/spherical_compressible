@@ -25,19 +25,30 @@ To run and plot using e.g. 4 processes:
 
 import numpy as np
 import dedalus.public as d3
+from mpi4py import MPI
 import logging
 logger = logging.getLogger(__name__)
+
+from scipy.special import erf
+def one_to_zero(x, x0, width=0.1):
+    return (1 - erf( (x - x0)/width))/2
+
+def zero_to_one(*args, **kwargs):
+    return -(one_to_zero(*args, **kwargs) - 1)
+
+
 
 
 # Parameters
 Ri, Ro, Ro2 = 0, 1, 2
-Nphi, Ntheta, Nr = 64, 32, 32
+Nphi, Ntheta, Nr = 1, 32, 32
 Rayleigh = 1e3
 Prandtl = 1
 dealias = 3/2
 timestepper = d3.SBDF2
 dtype = np.float64
-mesh = [16,16]
+mesh = None
+#mesh = [16,16]
 
 # Bases
 coords = d3.SphericalCoordinates('phi', 'theta', 'r')
@@ -126,6 +137,8 @@ VH = 2 * nu * (d3.trace(d3.dot(E,E)) - (1/3)*div_u*div_u)
 thermal_diffusion_L = gamma*kappa*(d3.lap(T1) + d3.dot(d3.grad(T1), grad_ln_rho0))
 thermal_diffusion_R = gamma*kappa*(d3.dot(d3.grad(T1), d3.grad(ln_rho1)))
 
+
+
 B2_grad_u = d3.grad(B2_u)
 B2_div_u = d3.div(B2_u)
 
@@ -135,7 +148,16 @@ B2_viscous_diffusion_L = nu*(d3.div(B2_sigma) + d3.dot(B2_sigma, B2_grad_ln_rho0
 B2_viscous_diffusion_R = nu*d3.dot(B2_sigma, d3.grad(B2_ln_rho1))
 B2_VH = 2 * nu * (d3.trace(d3.dot(B2_E,B2_E)) - (1/3)*B2_div_u*B2_div_u)
 
-#solve for hydrostatic equilibrium background state
+
+B2_thermal_diffusion_L = gamma*kappa*(d3.lap(B2_T1) + d3.dot(d3.grad(B2_T1), B2_grad_ln_rho0))
+B2_thermal_diffusion_R = gamma*kappa*(d3.dot(d3.grad(B2_T1), d3.grad(B2_ln_rho1)))
+
+
+Q['g'] = epsilon*one_to_zero(r, 0.5, width=0.1)
+B2_Q['g'] = epsilon*one_to_zero(B2_r, 0.5, width=0.1)
+
+
+#Analytical background state
 #assume g_vec = -r & T = 1 at outer boundary.
 A = -1/2
 B = 3
@@ -152,13 +174,6 @@ grad_ln_rho0['g'][2] = grad_ln_rho_func(r)
 rho0['g'] = rho_func(r)
 
 
-#for fd in [T0, grad_T0, grad_ln_T0, dS0_dr, grad_ln_rho0, rho0]:
-#    print(fd, fd['g'])
-
-
-
-#solve for hydrostatic equilibrium background state
-#assume g_vec = -r
 B2_T0['g'] = T_func(B2_r)
 B2_grad_T0['g'][2] = grad_T_func(B2_r)
 B2_grad_ln_T0['g'][2] = grad_ln_T_func(B2_r)
@@ -167,11 +182,184 @@ B2_grad_ln_rho0['g'][2] = grad_ln_rho_func(B2_r)
 B2_rho0['g'] = rho_func(B2_r)
 
 
-B2_thermal_diffusion_L = gamma*kappa*(d3.lap(B2_T1) + d3.dot(d3.grad(B2_T1), B2_grad_ln_rho0))
-B2_thermal_diffusion_R = gamma*kappa*(d3.dot(d3.grad(B2_T1), d3.grad(B2_ln_rho1)))
 
-Q['g'] = epsilon
-B2_Q['g'] = epsilon
+
+
+################################################################################################
+#BVP for background state
+BVP_dist = d3.Distributor(coords, dtype=dtype, mesh=mesh, comm=MPI.COMM_SELF)
+BVP_basis = d3.BallBasis(coords, shape=(1, 1, Nr), radius=Ro, dealias=1, dtype=dtype)
+BVP_basis2 = d3.ShellBasis(coords, shape=(1, 1, Nr), radii=(Ro, Ro2), dealias=1, dtype=dtype)
+BVP_s2_basis = basis.S2_basis()
+BVP_B2_s2_basis = basis2.S2_basis()
+BVP_phi, BVP_theta, BVP_r = BVP_dist.local_grids(BVP_basis)
+BVP_B2_phi, BVP_B2_theta, BVP_B2_r = BVP_dist.local_grids(BVP_basis2)
+
+
+# Parameters
+BVP_lift = lambda A: d3.Lift(A, BVP_basis.derivative_basis(0), -1)
+BVP_B2_lift = lambda A, n: d3.Lift(A, BVP_basis2.derivative_basis(2), n)
+
+#gravity
+BVP_dSdr_goal      = BVP_dist.VectorField(coords, name='dSdr_goal', bases=BVP_basis)
+BVP_B2_dSdr_goal   = BVP_dist.VectorField(coords, name='dSdr_goal', bases=BVP_basis2)
+BVP_dSdr_goal['g'][2] = zero_to_one(BVP_r, 0.8, width=0.1)
+BVP_B2_dSdr_goal['g'][2] = zero_to_one(BVP_B2_r, 0.8, width=0.1)
+
+
+BVP_g   = BVP_dist.VectorField(coords, name='g', bases=BVP_basis)
+BVP_B2_g   = BVP_dist.VectorField(coords, name='g', bases=BVP_basis2)
+BVP_g['g'][2] = -BVP_r
+BVP_B2_g['g'][2] = -BVP_B2_r
+
+BVP_r_vec = dist.VectorField(coords, bases=BVP_basis.radial_basis)
+BVP_B2_r_vec = dist.VectorField(coords, bases=BVP_basis2.radial_basis)
+BVP_r_vec['g'][2] = BVP_r
+BVP_B2_r_vec['g'][2] = BVP_B2_r
+
+
+BVP_T       = BVP_dist.Field(name='T', bases=BVP_basis)
+BVP_ln_rho  = BVP_dist.Field(name='ln_rho', bases=BVP_basis)
+BVP_tau_T   = BVP_dist.Field(name='tau_T', bases=BVP_s2_basis)
+BVP_tau_rho = BVP_dist.Field(name='tau_rho', bases=BVP_s2_basis)
+BVP_B2_T       = BVP_dist.Field(name='T', bases=BVP_basis2)
+BVP_B2_ln_rho  = BVP_dist.Field(name='ln_rho', bases=BVP_basis2)
+BVP_B2_tau_T   = BVP_dist.Field(name='tau_T', bases=BVP_B2_s2_basis)
+BVP_B2_tau_rho = BVP_dist.Field(name='tau_rho', bases=BVP_B2_s2_basis)
+
+
+BVP_ln_T  = np.log(BVP_T)
+BVP_rho   = np.exp(BVP_ln_rho)
+BVP_dS_dr = Cp * ((1/gamma) * d3.grad(BVP_ln_T) - ((gamma-1)/gamma)*d3.grad(BVP_ln_rho))
+BVP_N2_op = -BVP_g@BVP_dS_dr/Cp
+BVP_B2_ln_T  = np.log(BVP_B2_T)
+BVP_B2_rho   = np.exp(BVP_B2_ln_rho)
+BVP_B2_dS_dr = Cp * ((1/gamma) * d3.grad(BVP_B2_ln_T) - ((gamma-1)/gamma)*d3.grad(BVP_B2_ln_rho))
+BVP_B2_N2_op = -BVP_B2_g@BVP_B2_dS_dr/Cp
+
+#TODO: go from here
+BVP_T['g']   = -(BVP_r**2 - Ro2**2) + 1
+BVP_B2_T['g']   = -(BVP_B2_r**2 - Ro2**2) + 1
+
+BVP_ln_rho['g'] = (1/(gamma-1))*np.log(BVP_T['g'])
+BVP_B2_ln_rho['g'] = (1/(gamma-1))*np.log(BVP_B2_T['g'])
+
+pi = np.pi
+
+variables = [BVP_T, BVP_ln_rho, BVP_B2_T, BVP_B2_ln_rho, BVP_tau_T, BVP_tau_rho, BVP_B2_tau_T, BVP_B2_tau_rho]
+
+problem = d3.NLBVP(variables, namespace=locals())
+
+print(locals().keys())
+
+
+er = dist.VectorField(coords)
+er['g'][2] = 1
+
+problem.add_equation("- R*(grad(BVP_T)) + er*BVP_lift(BVP_tau_T) = + R*BVP_T*grad(BVP_ln_rho) - BVP_g")
+problem.add_equation("-R*BVP_r_vec@grad(BVP_ln_rho) - BVP_lift(BVP_tau_rho) = -(Cp/gamma)*BVP_r_vec@grad(BVP_ln_rho) + BVP_r_vec@BVP_dSdr_goal")
+problem.add_equation("- R*(grad(BVP_B2_T)) + BVP_B2_r_vec*BVP_B2_lift(BVP_B2_tau_T, -1) = + R*BVP_B2_T*grad(BVP_B2_ln_rho) - BVP_B2_g")
+problem.add_equation("-R*BVP_B2_r_vec@grad(BVP_B2_ln_rho) - BVP_B2_lift(BVP_B2_tau_rho, -1) = -(Cp/gamma)*BVP_B2_r_vec@grad(BVP_B2_ln_rho) + BVP_B2_r_vec@BVP_B2_dSdr_goal")
+
+problem.add_equation("BVP_T(r=Ro) - BVP_B2_T(r=Ro) = 0")
+problem.add_equation("BVP_ln_rho(r=Ro) - BVP_B2_ln_rho(r=Ro) = 0")
+problem.add_equation("BVP_B2_T(r=Ro2) = 1")
+problem.add_equation("BVP_B2_ln_rho(r=Ro2) = 0")
+
+
+ncc_cutoff=1e-10
+tolerance=1e-10
+solver = problem.build_solver(ncc_cutoff=ncc_cutoff)
+pert_norm = np.inf
+while pert_norm > tolerance:
+    solver.newton_iteration(damping=1)
+    pert_norm = sum(pert.allreduce_data_norm('c', 2) for pert in solver.perturbations)
+    logger.info(f'Perturbation norm: {pert_norm:.3e}')
+    plt.plot(BVP_r.ravel(), BVP_N2_op_B.evaluate()['g'].ravel())
+    plt.yscale('log')
+    plt.show()
+
+#rs = []
+#gs = []
+#N2s = []
+#HSEs = []
+#ln_Ts = []
+#Ts = []
+#ln_rhos = []
+#dS_drs = []
+#
+#for k, basis in bases.items():
+#    ln_T = namespace['ln_T_{}'.format(k)].evaluate()
+#    T = namespace['T_{}'.format(k)].evaluate()
+#    ln_rho = namespace['ln_rho_{}'.format(k)]
+#    dS_dr = namespace['dS_dr_{}'.format(k)].evaluate()
+#    g = namespace['g_{}'.format(k)]
+#    N2_op = namespace['N2_op_{}'.format(k)]
+#    N2 = N2_op.evaluate()
+#
+#    grad_ln_T = d3.grad(ln_T).evaluate()
+#    grad_ln_rho = d3.grad(ln_rho).evaluate()
+#    HSE = (-R*(d3.grad(ln_T) + d3.grad(ln_rho)) + g/T).evaluate()
+#
+#    phi, theta, r = dist.local_grids(basis, scales=(1,1,scales))
+#    dS_dr.change_scales((1,1,scales))
+#    ln_T.change_scales((1,1,scales))
+#    T.change_scales((1,1,scales))
+#    ln_rho.change_scales((1,1,scales))
+#    N2.change_scales((1,1,scales))
+#    HSE.change_scales((1,1,scales))
+#    g.change_scales((1,1,scales))
+#
+#    rs.append(r)
+#    gs.append(g['g'])
+#    N2s.append(N2['g'])
+#    ln_Ts.append(ln_T['g'])
+#    Ts.append(T['g'])
+#    ln_rhos.append(ln_rho['g'])
+#    dS_drs.append(dS_dr['g'])
+#    HSEs.append(HSE['g'])
+#
+#r = np.concatenate(rs, axis=-1)
+#g = np.concatenate(gs, axis=-1)
+#N2 = np.concatenate(N2s, axis=-1)
+#HSE = np.concatenate(HSEs, axis=-1)
+#ln_T = np.concatenate(ln_Ts, axis=-1)
+#T = np.concatenate(Ts, axis=-1)
+#ln_rho = np.concatenate(ln_rhos, axis=-1)
+#dS_dr = np.concatenate(dS_drs, axis=-1)
+#
+#fig = plt.figure()
+#ax1 = fig.add_subplot(4,1,1)
+#ax2 = fig.add_subplot(4,1,2)
+#ax3 = fig.add_subplot(4,1,3)
+#ax4 = fig.add_subplot(4,1,4)
+#ax1.plot(r.ravel(), ln_T.ravel(), label='ln_T')
+#ax1.plot(r.ravel(), ln_rho.ravel(), label='ln_rho')
+#ax1.legend()
+#ax2.plot(r.ravel(), HSE[2,:].ravel(), label='HSE')
+#ax2.legend()
+#ax3.plot(r.ravel(), g[2,:].ravel(), label=r'$g$')
+#ax3.legend()
+#ax4.plot(r.ravel(), N2.ravel(), label=r'$N^2$')
+#ax4.plot(r.ravel(), -N2.ravel(), label=r'$-N^2$')
+#ax4.plot(r.ravel(), (N2_func(r)).ravel(), label=r'$N^2$ goal', ls='--')
+#ax4.set_yscale('log')
+#yticks = (np.max(np.abs(N2.ravel()[r.ravel() < 0.5])), np.max(N2_func(r).ravel()))
+#ax4.set_yticks(yticks)
+#ax4.set_yticklabels(['{:.1e}'.format(n) for n in yticks])
+#ax4.legend()
+#fig.savefig('stratification.png', bbox_inches='tight', dpi=300)
+##    plt.show()
+#
+#
+#atmosphere = dict()
+#atmosphere['r'] = r
+#atmosphere['ln_T'] = ln_T
+#atmosphere['T'] = T
+#atmosphere['N2'] = N2
+#atmosphere['ln_rho'] = ln_rho
+#atmosphere['dS_dr'] = dS_dr
+
 
 # Problem
 problem = d3.IVP([ln_rho1, T1, u, B2_ln_rho1, B2_T1, B2_u, tau_T1, tau_u1, B2_tau_T1, B2_tau_T2, B2_tau_u1, B2_tau_u2], namespace=locals())
