@@ -29,6 +29,8 @@ from mpi4py import MPI
 import logging
 logger = logging.getLogger(__name__)
 
+from ball_bvp import ball_HSE_BVP
+
 from scipy.special import erf
 def one_to_zero(x, x0, width=0.1):
     return (1 - erf( (x - x0)/width))/2
@@ -41,9 +43,9 @@ def zero_to_one(*args, **kwargs):
 
 # Parameters
 Ro = 1
-Nphi, Ntheta, Nr = 1, 16, 16
+Nphi, Ntheta, Nr = 1, 16, 32
 #Nphi, Ntheta, Nr = 1, 32, 32
-Rayleigh = 1e3
+Rayleigh = 1e4
 Prandtl = 1
 dealias = 3/2
 timestepper = d3.SBDF2
@@ -68,7 +70,11 @@ tau_u2 = dist.VectorField(coords, name='tau_u2', bases=s2_basis)
 
 grad_pom0 = dist.VectorField(coords, name='grad_pom0', bases=basis.radial_basis)
 grad_s0 = dist.VectorField(coords, name='grad_s0', bases=basis.radial_basis)
+grad_ln_pom0 = dist.VectorField(coords, name='grad_ln_pom0', bases=basis.radial_basis)
+grad_ln_rho0 = dist.VectorField(coords, name='grad_ln_rho0', bases=basis.radial_basis)
 pom0 = dist.Field(name='pom0', bases=basis.radial_basis)
+ln_rho0 = dist.Field(name='ln_rho0', bases=basis.radial_basis)
+rho0 = dist.Field(name='rho0', bases=basis.radial_basis)
 g = dist.VectorField(coords, name='g', bases=basis.radial_basis)
 Q = dist.Field(name='Q', bases=basis)
 ones = dist.Field(name='ones', bases=basis)
@@ -108,16 +114,19 @@ div_u = d3.div(u)
 
 #Analytical background state
 #assume g_vec = -r & T = rho = 1 at outer boundary.
-pom_c = 1 + (gamma-1)/(2*gamma)
+N2_func = lambda r: 0*r
+g_func = lambda r: -r
+Lconv_func = lambda r: epsilon * r**3 * one_to_zero(r, 0.7*Ro, width=0.1*Ro)
+atmosphere = ball_HSE_BVP(N2_func, g_func, Lconv_func,  Nr=Nr, Ro=Ro, gamma=5/3, R=1)
 
-g['g'][2] = -r
-grad_s0['g'][2] = 0
-grad_pom0['g'][2] = (gamma-1)/(gamma) * g['g'][2]
-pom0['g'] = pom_c - (gamma-1)/(gamma) * r**2/2
-grad_ln_pom0 = (grad_pom0/pom0).evaluate()
-grad_ln_rho0 = ((1/(gamma-1)) * grad_ln_pom0).evaluate()
-rho0 = (pom0**(1/(gamma-1))).evaluate()
-ln_rho0 = np.log(rho0).evaluate()
+g['g'] = atmosphere['g']
+grad_s0['g'] = atmosphere['grad_s0']
+grad_pom0['g'] = atmosphere['grad_pom0']
+pom0['g'] = atmosphere['pom0']
+grad_ln_pom0['g'] = atmosphere['grad_ln_pom0']
+grad_ln_rho0['g'] = atmosphere['grad_ln_rho0']
+rho0['g'] = atmosphere['rho0']
+ln_rho0['g'] = atmosphere['ln_rho0']
 inv_pom0 = (1/pom0).evaluate()
 
 
