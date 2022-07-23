@@ -45,7 +45,7 @@ def zero_to_one(*args, **kwargs):
 Ro = 1
 Nphi, Ntheta, Nr = 1, 16, 32
 #Nphi, Ntheta, Nr = 1, 32, 32
-Rayleigh = 1e4
+Rayleigh = 1e3
 Prandtl = 1
 dealias = 3/2
 timestepper = d3.SBDF2
@@ -87,7 +87,7 @@ for i in range(3):
 # Substitutions
 epsilon = 1e-2
 t_buoy = np.sqrt(1/epsilon)
-max_timestep = t_buoy*2
+max_timestep = t_buoy/10 #TODO: add N^2 timestep constraint
 stop_sim_time = 2000*t_buoy
 chi = epsilon*(Rayleigh * Prandtl)**(-1/2)
 nu = epsilon*(Rayleigh / Prandtl)**(-1/2)
@@ -114,9 +114,9 @@ div_u = d3.div(u)
 
 #Analytical background state
 #assume g_vec = -r & T = rho = 1 at outer boundary.
-N2_func = lambda r: 0*r
+N2_func = lambda r: 0.5*zero_to_one(r, 0.8*Ro, width=0.1*Ro)
 g_func = lambda r: -r
-Lconv_func = lambda r: epsilon * r**3 * one_to_zero(r, 0.7*Ro, width=0.1*Ro)
+Lconv_func = lambda r: chi * epsilon * r**3 * one_to_zero(r, 0.7*Ro, width=0.1*Ro)
 atmosphere = ball_HSE_BVP(N2_func, g_func, Lconv_func,  Nr=Nr, Ro=Ro, gamma=5/3, R=1)
 
 g['g'] = atmosphere['g']
@@ -128,6 +128,7 @@ grad_ln_rho0['g'] = atmosphere['grad_ln_rho0']
 rho0['g'] = atmosphere['rho0']
 ln_rho0['g'] = atmosphere['ln_rho0']
 inv_pom0 = (1/pom0).evaluate()
+Q['g'] = atmosphere['Q']
 
 
 pom1_over_pom0 = gamma*(s1/Cp + ((gamma-1)/gamma)*ln_rho1)
@@ -164,7 +165,6 @@ thermal_diffusion_R = (gamma/(gamma-1))*chi*(R/(rho_full*pom_full))*d3.div(rho_f
 
 HSE = linear_HSE + nonlinear_HSE
 
-Q['g'] = chi*10*epsilon
 
 
 # Problem
@@ -186,7 +186,7 @@ s1.fill_random('g', seed=42, distribution='normal', scale=1e-6*epsilon) # Random
 s1['g'] *= r**2 - Ro**2
 
 # Analysis
-snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=10*t_buoy, max_writes=10)
+snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=2*max_timestep, max_writes=10)
 snapshots.add_task(s1(theta=np.pi/2), name='s1_eq')
 snapshots.add_task(s1(phi=0), name='s1(phi=0)')
 snapshots.add_task(s1(phi=np.pi), name='s1(phi=pi)')
@@ -214,7 +214,7 @@ try:
     while solver.proceed:
         timestep = CFL.compute_timestep()
         solver.step(timestep)
-        if (solver.iteration-1) % 10 == 0:
+        if (solver.iteration-1) % 1 == 0:
             max_Re = flow.max('Re')
             logger.info('Iteration=%i, Time=%e, dt=%e, max(Re)=%f' %(solver.iteration, solver.sim_time, timestep, max_Re))
         if np.isnan(max_Re):
