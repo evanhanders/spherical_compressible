@@ -16,8 +16,7 @@ def zero_to_one(*args, **kwargs):
 # Parameters
 Ri, Ro = 1.05, 2
 Nphi, Ntheta, NrB, NrS = 1, 16, 32, 16
-#Nphi, Ntheta, NrB, NrS = 1, 32, 64, 32
-Reynolds = 1e2
+Reynolds = 3e2
 Prandtl = 1
 Peclet = Prandtl * Reynolds
 epsilon = 1e-4
@@ -45,8 +44,8 @@ timestepper = d3.SBDF2
 safety = 0.15
 t_buoy = np.sqrt(1/epsilon)
 #max_timestep = t_buoy/10
-max_timestep = np.min((t_buoy/10, 0.25/np.sqrt(N2_func(Ro))))
-stop_sim_time = 2000*t_buoy
+max_timestep = np.min((t_buoy/10, 0.5/np.sqrt(N2_func(Ro))))
+stop_sim_time = 100*t_buoy
 
 # Bases
 coords = d3.SphericalCoordinates('phi', 'theta', 'r')
@@ -219,7 +218,7 @@ problem.add_equation("B1_s1(r=Ri) - B2_s1(r=Ri) = 0")
 problem.add_equation("B1_u(r=Ri) - B2_u(r=Ri) = 0")
 problem.add_equation("angular(radial(B1_sigma(r=Ri) - B2_sigma(r=Ri))) = 0")
 problem.add_equation("B1_ln_rho1(r=Ri) - B2_ln_rho1(r=Ri) = 0")
-problem.add_equation("radial(B1_grad_s1(r=Ri) - B2_grad_s1(r=Ri)) = 0")
+problem.add_equation("radial(B1_grad_pom1(r=Ri) - B2_grad_pom1(r=Ri)) = -radial(grad(B1_pom_fluc)(r=Ri) - grad(B2_pom_fluc)(r=Ri))")
 
 # Solver
 solver = problem.build_solver(timestepper)
@@ -230,7 +229,7 @@ B1_s1.fill_random('g', seed=42, distribution='normal', scale=1e-3*epsilon) # Ran
 B1_s1['g'] *= B1_r**2 * one_to_zero(B1_r, 0.8*Ri, width=0.2*Ri)
 
 # Analysis
-snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=t_buoy/10, max_writes=10)
+snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=t_buoy/5, max_writes=10)
 snapshots.add_task(B1_s1(theta=np.pi/2), name='B1_s1_eq')
 snapshots.add_task(B1_s1(phi=0), name='B1_s1(phi=0)')
 snapshots.add_task(B1_s1(phi=np.pi), name='B1_s1(phi=pi)')
@@ -266,7 +265,7 @@ try:
         if (solver.iteration-1) % 1 == 0:
             max_Re = flow.max('Re')
             max_Ma = flow.max('Ma')
-            logger.info('Iteration=%i, Time=%e, dt=%e, max(Re)=%e, max(Ma)=%e' %(solver.iteration, solver.sim_time, timestep, max_Re, max_Ma))
+            logger.info('Iteration=%i, Time=%e / %e, dt=%e / %e, max(Re)=%e, max(Ma)=%e' %(solver.iteration, solver.sim_time, solver.sim_time/t_buoy, timestep, timestep/t_buoy, max_Re, max_Ma))
         if np.isnan(max_Re):
             raise ValueError("Re is NaN")
 except:
