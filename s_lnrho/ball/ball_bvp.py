@@ -80,7 +80,7 @@ def ball_HSE_BVP(N2_func, g_func, Lconv_func,  Nr=Nr, Ro=Ro, gamma=5/3, R=1):
     pomega = np.exp(ln_pomega) # = R * T
     log = np.log
     HSE = gamma*pomega*(d3.grad(ln_rho) + d3.grad(s)/Cp) - g*ones
-    N2 = g@d3.grad(s)/Cp
+    N2 = -g@d3.grad(s)/Cp
 
     Fconv = dist.VectorField(coords, name='Fconv', bases=basis)
     Fconv['g'][2] = Lconv_func(r)/ (4*np.pi*r**2)

@@ -29,7 +29,7 @@ R = 1
 Cv = R * 1 / (gamma-1)
 Cp = R + Cv
 
-def ball_HSE_BVP(N2_func, g_func, Lconv_func,  Nrs=(NrB, NrS), radii=(Ri, Ro),gamma=5/3, R=1):
+def ballShell_HSE_BVP(N2_func, g_func, Lconv_func,  Nrs=(NrB, NrS), radii=(Ri, Ro),gamma=5/3, R=1):
     B1_Nr, B2_Nr = Nrs
     Ri, Ro = radii
     log = np.log
@@ -99,7 +99,7 @@ def ball_HSE_BVP(N2_func, g_func, Lconv_func,  Nrs=(NrB, NrS), radii=(Ri, Ro),ga
     B1_ln_pomega = gamma*(B1_s/Cp + ((gamma-1)/gamma)*B1_ln_rho)
     B1_pomega = np.exp(B1_ln_pomega) # = R * T
     B1_HSE = gamma*B1_pomega*(d3.grad(B1_ln_rho) + d3.grad(B1_s)/Cp) - B1_g*B1_ones
-    B1_N2 = B1_g@d3.grad(B1_s)/Cp
+    B1_N2 = -B1_g@d3.grad(B1_s)/Cp
     B1_Fconv = dist.VectorField(coords, name='Fconv', bases=B1_basis)
     B1_Fconv['g'][2] = Lconv_func(B1_r)/ (4*np.pi*B1_r**2)
     B1_N2_input['g'] = N2_func(B1_r)
@@ -107,7 +107,7 @@ def ball_HSE_BVP(N2_func, g_func, Lconv_func,  Nrs=(NrB, NrS), radii=(Ri, Ro),ga
     B2_ln_pomega = gamma*(B2_s/Cp + ((gamma-1)/gamma)*B2_ln_rho)
     B2_pomega = np.exp(B2_ln_pomega) # = R * T
     B2_HSE = gamma*B2_pomega*(d3.grad(B2_ln_rho) + d3.grad(B2_s)/Cp) - B2_g*B2_ones
-    B2_N2 = B2_g@d3.grad(B2_s)/Cp
+    B2_N2 = -B2_g@d3.grad(B2_s)/Cp
     B2_Fconv = dist.VectorField(coords, name='Fconv', bases=B2_basis)
     B2_Fconv['g'][2] = Lconv_func(B2_r)/ (4*np.pi*B2_r**2)
     B2_N2_input['g'] = N2_func(B2_r)
@@ -199,4 +199,4 @@ if __name__ == '__main__':
     g_func = lambda r: -r
     Lconv_func = lambda r: epsilon * r**3 * one_to_zero(r, 0.7*Ri, width=0.1*Ri)
 
-    ball_HSE_BVP(N2_func, g_func, Lconv_func, Nrs=(NrB, NrS), radii=(Ri,Ro), gamma=5/3, R=1)
+    ballShell_HSE_BVP(N2_func, g_func, Lconv_func, Nrs=(NrB, NrS), radii=(Ri,Ro), gamma=5/3, R=1)
