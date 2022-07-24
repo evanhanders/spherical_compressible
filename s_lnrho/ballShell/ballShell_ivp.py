@@ -226,7 +226,11 @@ solver.stop_sim_time = stop_sim_time
 
 # Initial conditions
 B1_s1.fill_random('g', seed=42, distribution='normal', scale=1e-3*epsilon) # Random noise
-B1_s1['g'] *= B1_r**2 * one_to_zero(B1_r, 0.8*Ri, width=0.2*Ri)
+B2_s1.fill_random('g', seed=42, distribution='normal', scale=1e-3*epsilon) # Random noise
+B1_s1.low_pass_filter(scales=0.5)
+B2_s1.low_pass_filter(scales=0.5)
+B1_s1['g'] *= B1_r**2 * one_to_zero(B1_r, 0.8*Ri, width=0.1*Ri)
+B2_s1['g'] *= B2_r**2 * one_to_zero(B2_r, 0.8*Ri, width=0.1*Ri)
 
 # Analysis
 snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=t_buoy/5, max_writes=10)
