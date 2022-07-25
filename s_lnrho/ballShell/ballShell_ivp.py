@@ -19,7 +19,7 @@ Nphi, Ntheta, NrB, NrS = 1, 16, 32, 16
 Reynolds = 3e2
 Prandtl = 1
 Peclet = Prandtl * Reynolds
-epsilon = 1e-4
+epsilon = 1e-5
 chi = (epsilon**(1/2))/Peclet
 nu  = (epsilon**(1/2))/Reynolds
 gamma = 5/3
@@ -251,7 +251,6 @@ snapshots.add_task(B2_u(theta=np.pi/2), name='B2_u_eq')
 CFL = d3.CFL(solver, initial_dt=max_timestep, cadence=1, safety=safety, threshold=0.1,
              max_change=1.5, min_change=0.5, max_dt=max_timestep)
 CFL.add_velocity(B1_u)
-CFL.add_velocity(B2_u)
 
 # Flow properties
 flow = d3.GlobalFlowProperty(solver, cadence=1)
