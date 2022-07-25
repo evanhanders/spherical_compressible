@@ -15,8 +15,8 @@ def zero_to_one(*args, **kwargs):
 
 # Parameters
 Ri, Ro = 1.05, 1.5
-Nphi, Ntheta, NrB, NrS = 1, 16, 32, 16
-Reynolds = 3e2
+Nphi, Ntheta, NrB, NrS = 1, 32, 64, 32
+Reynolds = 4e2
 Prandtl = 1
 Peclet = Prandtl * Reynolds
 epsilon = 1e-5
