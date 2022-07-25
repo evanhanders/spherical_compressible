@@ -14,7 +14,7 @@ def zero_to_one(*args, **kwargs):
     return -(one_to_zero(*args, **kwargs) - 1)
 
 # Parameters
-Ri, Ro = 1.05, 2
+Ri, Ro = 1.05, 1.5
 Nphi, Ntheta, NrB, NrS = 1, 16, 32, 16
 Reynolds = 3e2
 Prandtl = 1
@@ -43,8 +43,8 @@ atmosphere = ballShell_HSE_BVP(N2_func, g_func, Lconv_func, Nrs=(NrB, NrS), radi
 timestepper = d3.SBDF2
 safety = 0.15
 t_buoy = np.sqrt(1/epsilon)
-#max_timestep = t_buoy/10
-max_timestep = np.min((t_buoy/10, 0.5/np.sqrt(N2_func(Ro))))
+max_timestep = t_buoy/10
+#max_timestep = np.min((t_buoy/10, 0.5/np.sqrt(N2_func(Ro))))
 stop_sim_time = 100*t_buoy
 
 # Bases
