@@ -70,7 +70,7 @@ def luminosities(ax, dictionary, index):
 
     sim_lum = Lconv_func(rs)
     sum = KEs +enths + viscs + conds + PEs
-    ax.plot(rs, sim_lum, label='gboal', c='k')
+    ax.plot(rs, sim_lum, label='goal', c='k')
 
     ax.plot(rs, 4*np.pi*rs**2*KEs, label='KE', c=Dark2_7[0])
     ax.plot(rs, 4*np.pi*rs**2*enths, label='enth', c=Dark2_7[1])

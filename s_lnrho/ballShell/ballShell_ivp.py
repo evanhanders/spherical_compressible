@@ -57,7 +57,7 @@ safety = 0.15
 t_buoy = np.sqrt(1/epsilon)
 max_timestep = t_buoy/10
 #max_timestep = np.min((t_buoy/10, 0.5/np.sqrt(N2_func(Ro))))
-stop_sim_time = 100*t_buoy
+stop_sim_time = 10*t_buoy
 
 # Bases
 coords = d3.SphericalCoordinates('phi', 'theta', 'r')
@@ -233,7 +233,8 @@ problem.add_equation("dt(B2_ln_rho1) + B2_div_u + B2_u@B2_grad_ln_rho0 + (1/nu)*
 problem.add_equation("dt(B2_s1) + dot(B2_u, B2_grad_s0) - B2_thermal_diffusion_L + B2_lift(B2_tau_s1, -1) + B2_lift(B2_tau_s2, -2) = - B2_u@grad(B2_s1) + B2_thermal_diffusion_R + (R/(B2_rho_full*B2_pom_full))*(B2_Q + B2_VH)")
 problem.add_equation("dt(B2_u) - B2_viscous_diffusion_L + B2_linear_HSE + B2_lift(B2_tau_u1, -1) + B2_lift(B2_tau_u2, -2) = - B2_u@grad(B2_u) - B2_nonlinear_HSE + B2_viscous_diffusion_R")
 
-problem.add_equation("B2_s1(r=Ro) = 0")
+problem.add_equation("radial(B2_grad_pom1(r=Ro)) = -radial(grad(B2_pom_fluc)(r=Ro))")
+#problem.add_equation("B2_s1(r=Ro) = 0")
 problem.add_equation("radial(B2_u(r=Ro)) = 0")
 problem.add_equation("angular(radial(B2_E(r=Ro))) = 0")
 
