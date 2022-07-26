@@ -15,11 +15,11 @@ def zero_to_one(*args, **kwargs):
 
 # Parameters
 Ri, Ro = 1.05, 1.5
-Nphi, Ntheta, NrB, NrS = 1, 32, 64, 32
+Nphi, Ntheta, NrB, NrS = 1, 128, 128, 64
 Reynolds = 4e2
 Prandtl = 1
 Peclet = Prandtl * Reynolds
-epsilon = 1e-5
+epsilon = 1e-6
 chi = (epsilon**(1/2))/Peclet
 nu  = (epsilon**(1/2))/Reynolds
 gamma = 5/3
@@ -28,13 +28,25 @@ Cv = R * 1 / (gamma-1)
 Cp = R + Cv
 dealias = 3/2
 dtype = np.float64
-mesh = None
-#mesh = [16,16]
+ncc_cutoff=1e-10
+max_ncc_terms=32
+
+# Processor mesh
+ncpu = MPI.COMM_WORLD.size
+log2 = np.log2(ncpu)
+if log2 == int(log2):
+    mesh = [int(2**np.ceil(log2/2)),int(2**np.floor(log2/2))]
+if Nphi == 1:
+    mesh = [1, ncpu]
+logger.info("running on processor mesh={}".format(mesh))
+
+
 
 
 #Atmosphere setup
 N2_func = lambda r: 0.5*zero_to_one(r, 0.8*Ri, width=0.1*Ri)
 g_func = lambda r: -r
+g_phi_func = lambda r: r**2/2
 Lconv_func = lambda r: epsilon * r**3 * one_to_zero(r, 0.7*Ri, width=0.1*Ri)
 #Lconv_func = lambda r: epsilon * chi * r**3 * one_to_zero(r, 0.7*Ri, width=0.1*Ri)
 atmosphere = ballShell_HSE_BVP(N2_func, g_func, Lconv_func, Nrs=(NrB, NrS), radii=(Ri,Ro), gamma=gamma, R=R)
@@ -49,7 +61,7 @@ stop_sim_time = 100*t_buoy
 
 # Bases
 coords = d3.SphericalCoordinates('phi', 'theta', 'r')
-dist = d3.Distributor(coords, dtype=np.float64, mesh=None, comm=MPI.COMM_SELF)
+dist = d3.Distributor(coords, dtype=np.float64, mesh=mesh)
 B1_basis = d3.BallBasis(coords, shape=(Nphi, Ntheta, NrB), radius=Ri, dealias=dealias, dtype=dtype)
 B1_s2_basis = B1_basis.S2_basis()
 B1_phi, B1_theta, B1_r = dist.local_grids(B1_basis)
@@ -82,6 +94,7 @@ B1_pom0 = dist.Field(name='pom0', bases=B1_basis.radial_basis)
 B1_rho0 = dist.Field(name='rho0', bases=B1_basis.radial_basis)
 B1_ln_rho0 = dist.Field(name='ln_rho0', bases=B1_basis.radial_basis)
 B1_g = dist.VectorField(coords, name='g', bases=B1_basis.radial_basis)
+B1_g_phi = dist.Field(name='g_phi', bases=B1_basis.radial_basis)
 B1_Q = dist.Field(name='Q', bases=B1_basis)
 B1_ones = dist.Field(name='ones', bases=B1_basis)
 B1_ones['g'] = 1
@@ -93,9 +106,11 @@ B2_pom0 = dist.Field(name='pom0', bases=B2_basis.radial_basis)
 B2_rho0 = dist.Field(name='rho0', bases=B2_basis.radial_basis)
 B2_ln_rho0 = dist.Field(name='ln_rho0', bases=B2_basis.radial_basis)
 B2_g = dist.VectorField(coords, name='g', bases=B2_basis.radial_basis)
+B2_g_phi = dist.Field(name='g_phi', bases=B2_basis.radial_basis)
 B2_Q = dist.Field(name='Q', bases=B2_basis)
 B2_ones = dist.Field(name='ones', bases=B2_basis)
 B2_ones['g'] = 1
+
 
 eye = dist.TensorField(coords, name='I')
 eye['g'] = 0
@@ -146,7 +161,15 @@ B2_ln_rho0['g'] = atmosphere['ln_rho0'](B2_r)
 B2_Q['g'] = atmosphere['Q'](B2_r)
 B2_inv_pom0 = (1/B2_pom0).evaluate()
 
+B1_g_phi['g'] = g_phi_func(B1_r)
+B2_g_phi['g'] = g_phi_func(B2_r)
+
 #Fluctuating thermodynamics
+
+
+#print(MPI.COMM_WORLD.rank, atmosphere['Q'](np.linspace(0, Ro, 20)))
+#import sys
+#sys.exit()
 B1_pom1_over_pom0 = gamma*(B1_s1/Cp + ((gamma-1)/gamma)*B1_ln_rho1)
 B1_grad_pom1_over_pom0 = gamma*(B1_grad_s1/Cp + ((gamma-1)/gamma)*B1_grad_ln_rho1)
 B1_pom1 = B1_pom0*B1_pom1_over_pom0
@@ -221,7 +244,7 @@ problem.add_equation("B1_ln_rho1(r=Ri) - B2_ln_rho1(r=Ri) = 0")
 problem.add_equation("radial(B1_grad_pom1(r=Ri) - B2_grad_pom1(r=Ri)) = -radial(grad(B1_pom_fluc)(r=Ri) - grad(B2_pom_fluc)(r=Ri))")
 
 # Solver
-solver = problem.build_solver(timestepper)
+solver = problem.build_solver(timestepper, ncc_cutoff=ncc_cutoff, max_ncc_terms=max_ncc_terms)
 solver.stop_sim_time = stop_sim_time
 
 # Initial conditions
@@ -233,7 +256,51 @@ B1_s1['g'] *= B1_r**2 * one_to_zero(B1_r, 0.8*Ri, width=0.1*Ri)
 B2_s1['g'] *= B2_r**2 * one_to_zero(B2_r, 0.8*Ri, width=0.1*Ri)
 
 # Analysis
-snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=t_buoy/5, max_writes=10)
+s2_avg = lambda A : d3.Average(A, coords.S2coordsys)
+vol_avg = lambda A : d3.Average(A, coords)
+vol_integ = lambda A : d3.Integrate(A, coords)
+
+#Energies
+B1_KE = B1_rho_full * (B1_u@B1_u)/2
+B1_IE = B1_rho_full * (gamma/(gamma-1)) * B1_pom_full
+B1_IE0 = B1_rho0 * (gamma/(gamma-1)) * B1_pom0
+B1_IE_fluc = B1_IE - B1_IE0*B1_ones
+B1_PE = B1_rho_full * B1_g_phi
+B1_PE0 = B1_rho0 * B1_g_phi
+B1_PE_fluc = B1_PE - B1_PE0*B1_ones
+B1_TE = B1_KE + B1_IE + B1_PE
+B1_TE_fluc = B1_KE + B1_IE_fluc + B1_PE_fluc
+
+B2_KE = B2_rho_full * (B2_u@B2_u)/2
+B2_IE = B2_rho_full * (gamma/(gamma-1)) * B2_pom_full
+B2_IE0 = B2_rho0 * (gamma/(gamma-1)) * B2_pom0
+B2_IE_fluc = B2_IE - B2_IE0*B2_ones
+B2_PE = B2_rho_full * B2_g_phi
+B2_PE0 = B2_rho0 * B2_g_phi
+B2_PE_fluc = B2_PE - B2_PE0*B2_ones
+B2_TE = B2_KE + B2_IE + B2_PE
+B2_TE_fluc = B2_KE + B2_IE_fluc + B2_PE_fluc
+
+
+#Fluxes
+B1_momentum = B1_u * B1_rho_full
+B1_F_cond = -1*(gamma/(gamma-1))*chi*B1_rho_full*(B1_grad_pom1 + d3.grad(B1_pom_fluc)) 
+B1_F_KE = B1_momentum * (B1_u@B1_u)/2
+B1_F_PE = B1_momentum * B1_g_phi
+B1_F_enth = (B1_momentum) * (gamma / (gamma - 1)) * B1_pom_full
+B1_F_visc = -nu * B1_momentum @ B1_sigma
+
+B2_momentum = B2_u * B2_rho_full
+B2_F_cond = -1*(gamma/(gamma-1))*chi*B2_rho_full*(B2_grad_pom1 + d3.grad(B2_pom_fluc)) 
+B2_F_KE = B2_momentum * (B2_u@B2_u)/2
+B2_F_PE = B2_momentum * B2_g_phi
+B2_F_enth = (B2_momentum) * (gamma / (gamma - 1)) * B2_pom_full
+B2_F_visc = -nu * B2_momentum @ B2_sigma
+
+
+
+
+snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=t_buoy/20, max_writes=20)
 snapshots.add_task(B1_s1(theta=np.pi/2), name='B1_s1_eq')
 snapshots.add_task(B1_s1(phi=0), name='B1_s1(phi=0)')
 snapshots.add_task(B1_s1(phi=np.pi), name='B1_s1(phi=pi)')
@@ -246,6 +313,28 @@ snapshots.add_task(B2_s1(phi=np.pi), name='B2_s1(phi=pi)')
 snapshots.add_task(B2_u(phi=0), name='B2_u(phi=0)')
 snapshots.add_task(B2_u(phi=np.pi), name='B2_u(phi=pi)')
 snapshots.add_task(B2_u(theta=np.pi/2), name='B2_u_eq')
+
+
+profiles = solver.evaluator.add_file_handler('profiles', sim_dt=t_buoy/20, max_writes=20)
+profiles.add_task(er@s2_avg(B1_F_cond), name='B1_F_cond')
+profiles.add_task(er@s2_avg(B1_F_KE), name='B1_F_KE')
+profiles.add_task(er@s2_avg(B1_F_PE), name='B1_F_PE')
+profiles.add_task(er@s2_avg(B1_F_enth), name='B1_F_enth')
+profiles.add_task(er@s2_avg(B1_F_visc), name='B1_F_visc')
+profiles.add_task(er@s2_avg(B2_F_cond), name='B2_F_cond')
+profiles.add_task(er@s2_avg(B2_F_KE), name='B2_F_KE')
+profiles.add_task(er@s2_avg(B2_F_PE), name='B2_F_PE')
+profiles.add_task(er@s2_avg(B2_F_enth), name='B2_F_enth')
+profiles.add_task(er@s2_avg(B2_F_visc), name='B2_F_visc')
+
+scalars = solver.evaluator.add_file_handler('scalars', sim_dt=t_buoy/20, max_writes=1000)
+scalars.add_task(vol_integ(B1_TE_fluc) + vol_integ(B2_TE_fluc), name='TE_fluc')
+scalars.add_task(vol_integ(B1_IE_fluc) + vol_integ(B2_IE_fluc), name='IE_fluc')
+scalars.add_task(vol_integ(B1_PE_fluc) + vol_integ(B2_PE_fluc), name='PE_fluc')
+scalars.add_task(vol_integ(B1_KE) + vol_integ(B2_KE), name='KE')
+scalars.add_task(vol_integ(B1_TE) + vol_integ(B2_TE), name='TE')
+scalars.add_task(vol_integ(B1_IE) + vol_integ(B2_IE), name='IE')
+scalars.add_task(vol_integ(B1_PE) + vol_integ(B2_PE), name='PE')
 
 # CFL
 CFL = d3.CFL(solver, initial_dt=max_timestep, cadence=1, safety=safety, threshold=0.1,
