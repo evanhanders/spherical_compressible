@@ -67,6 +67,9 @@ tau_s1 = dist.Field(name='tau_s1', bases=s2_basis)
 tau_T2 = dist.Field(name='tau_T2', bases=s2_basis)
 tau_u1 = dist.VectorField(coords, name='tau_u1', bases=s2_basis)
 tau_u2 = dist.VectorField(coords, name='tau_u2', bases=s2_basis)
+PE_int = dist.Field(name='PE_int')
+KE_int = dist.Field(name='KE_int')
+IE_int = dist.Field(name='IE_int')
 
 grad_pom0 = dist.VectorField(coords, name='grad_pom0', bases=basis.radial_basis)
 grad_s0 = dist.VectorField(coords, name='grad_s0', bases=basis.radial_basis)
@@ -106,6 +109,7 @@ rvec['g'][2] = r
 
 lift_basis = basis.derivative_basis(0)
 lift = lambda A: d3.Lift(A, lift_basis, -1)
+integ = lambda A: d3.Integrate(A, coords)
 
 
 grad_u = d3.grad(u)
@@ -188,9 +192,14 @@ Q_production = Q
 PdV_production = momentum @ (-nonlinear_HSE - linear_HSE - ones*gamma*pom0*(grad_ln_rho0 + grad_s0/Cp)) - P_full*d3.div(u)
 tau_production = -momentum @ lift(tau_u1) - (P_full/R) * lift(tau_s1)
 
+PE_production = -(d3.div(g_phi*momentum) + momentum@g)
+KE_production = momentum@(viscous_diffusion_L + viscous_diffusion_R - nonlinear_HSE - linear_HSE - lift(tau_u1)) - d3.div(u*KE)
+IE_production = thermal_diff_production + Q_production - P_full*d3.div(u) - (P_full/R)*lift(tau_s1) - d3.div(u*IE) + rho_full*VH
+E_production = PE_production + KE_production + IE_production
+
 
 # Problem
-problem = d3.IVP([ln_rho1, s1, u, tau_s1, tau_u1, ], namespace=locals())
+problem = d3.IVP([ln_rho1, s1, u, tau_s1, tau_u1, PE_int, KE_int, IE_int], namespace=locals())
 problem.add_equation("dt(ln_rho1) + div_u + u@grad_ln_rho0 = -u@grad(ln_rho1)")
 problem.add_equation("dt(s1) + dot(u, grad_s0) - thermal_diffusion_L + lift(tau_s1) = - u@grad(s1) + thermal_diffusion_R + (R/P_full)*(Q + rho_full*VH)")
 problem.add_equation("dt(u) - viscous_diffusion_L + linear_HSE + lift(tau_u1) = - u@grad(u) - nonlinear_HSE + viscous_diffusion_R")
@@ -199,6 +208,10 @@ problem.add_equation("dt(u) - viscous_diffusion_L + linear_HSE + lift(tau_u1) = 
 problem.add_equation("radial(grad_pom1(r=Ro)) = -radial(grad(pom_fluc)(r=Ro))")
 problem.add_equation("radial(u(r=Ro)) = 0")
 problem.add_equation("angular(radial(E(r=Ro))) = 0")
+
+problem.add_equation("dt(PE_int) = integ(PE_production)")
+problem.add_equation("dt(KE_int) = integ(KE_production)")
+problem.add_equation("dt(IE_int) = integ(IE_production)")
 
 # Solver
 solver = problem.build_solver(timestepper)
@@ -221,7 +234,8 @@ snapshots.add_task((linear_HSE)(phi=np.pi), name='HSE(phi=pi)')
 
 
 # Analysis
-integ = lambda A: d3.Integrate(A, coords)
+TE_int = KE_int + PE_int + IE_int
+FE_int = TE_int - integ((IE0+PE0)*ones)
 scalars = solver.evaluator.add_file_handler('scalars', sim_dt=max_timestep, max_writes=100)
 scalars.add_task(integ(KE), name='KE')
 scalars.add_task(integ(IE), name='IE')
@@ -236,8 +250,14 @@ scalars.add_task(integ(thermal_diff_production), name='prod_thermdiff')
 scalars.add_task(integ(Q_production), name='prod_Q')
 scalars.add_task(integ(PdV_production), name='prod_PdV')
 scalars.add_task(integ(tau_production), name='prod_tau')
-
-
+scalars.add_task(PE_int, name='PE_int')
+scalars.add_task(PE_int - integ(PE0*ones), name='PE1_int')
+scalars.add_task(KE_int, name='KE_int')
+scalars.add_task(IE_int, name='IE_int')
+scalars.add_task(IE_int - integ(IE0*ones), name='IE1_int')
+scalars.add_task(TE_int, name='TE_int')
+scalars.add_task(FE_int, name='FE_int')
+scalars.add_task(integ(E_production), name='E_production')
 # CFL
 CFL = d3.CFL(solver, initial_dt=max_timestep, cadence=1, safety=0.2, threshold=0.1,
              max_change=1.5, min_change=0.5, max_dt=max_timestep)
@@ -247,17 +267,27 @@ CFL.add_velocity(u)
 flow = d3.GlobalFlowProperty(solver, cadence=1)
 flow.add_property(np.sqrt(u@u)/nu, name='Re')
 flow.add_property(integ(KE), name='KE')
-flow.add_property(integ(FE), name='FE')
+flow.add_property(integ(PE), name='PE')
+flow.add_property(integ(IE), name='IE')
 flow.add_property(integ(PE1), name='PE1')
 flow.add_property(integ(IE1), name='IE1')
+flow.add_property(integ(FE), name='FE')
 flow.add_property(integ(viscous_production), name='prod_visc')
 flow.add_property(integ(thermal_diff_production), name='prod_thermdiff')
 flow.add_property(integ(Q_production), name='prod_Q')
 flow.add_property(integ(PdV_production), name='prod_PdV')
 flow.add_property(integ(tau_production), name='prod_tau')
 flow.add_property(integ(EOS_goodness), name='EOS')
+flow.add_property(FE_int, name='FE_int')
 
 #EOS = (grad_s0*ones + grad_s1)/Cp - ((1/gamma)*d3.grad(np.log(pom0*ones + pom1 + pom_fluc)) - ((gamma-1)/(gamma))*(grad_ln_rho0*ones + grad_ln_rho1))
+
+PE_int['g'] = integ(PE).evaluate()['g']
+PE_int0 = np.copy(PE_int['g']).min()
+
+
+IE_int['g'] = integ(IE).evaluate()['g']
+IE_int0 = np.copy(IE_int['g']).min()
 
 # Main loop
 try:
@@ -267,13 +297,15 @@ try:
         solver.step(timestep)
         if (solver.iteration-1) % 1 == 0:
             max_Re = flow.max('Re')
-            logger.info('Iteration=%i, Time=%e, dt=%e, max(Re)=%e, EOS=%e' %(solver.iteration, solver.sim_time, timestep, max_Re, flow.max("EOS")))
+            logger.info('Iteration=%i, Time=%e, dt=%e, max(Re)=%e, EOS=%e, FE_int=%e' %(solver.iteration, solver.sim_time, timestep, max_Re, flow.max("EOS"), flow.max("FE_int")))
             FE = flow.max("FE") #flow.max("PE1") + flow.max("IE1") + flow.max("KE")
             logger.info("FE: {:.3e}, KE: {:.3e}, PE1: {:.3e}, IE1: {:.3e}".format(FE, flow.max("KE"), flow.max("PE1"), flow.max("IE1")))
-            total_production = 0
-            for f in ['visc', 'thermdiff', 'Q', 'PdV', 'tau']:
-                total_production += flow.max("prod_{}".format(f))
+            total_production = integ(E_production).evaluate()['g'].min()
             logger.info("Production ({:.3e}) - visc: {:.3e}, thermdiff: {:.3e}, Q: {:.3e}, PdV: {:.3e}, tau: {:.3e}".format(total_production, flow.max("prod_visc"), flow.max("prod_thermdiff"), flow.max("prod_Q"), flow.max("prod_PdV"), flow.max("prod_tau")))
+            logger.info("PE {:.3e} (diff {:.3e}), KE {:.3e} (diff {:.3e}), IE {:.3e} (diff {:.3e})".\
+                        format(PE_int['g'].min() - PE_int0, PE_int['g'].min() - flow.max("PE"), \
+                               KE_int['g'].min(), KE_int['g'].min() - flow.max("KE"), \
+                               IE_int['g'].min() - IE_int0, IE_int['g'].min() - flow.max("IE")))
         if np.isnan(max_Re):
             raise ValueError("Re is NaN")
 except:
