@@ -71,6 +71,9 @@ PE_int = dist.Field(name='PE_int')
 KE_int = dist.Field(name='KE_int')
 IE_int = dist.Field(name='IE_int')
 
+KE_last = dist.Field(name='KE_last')
+KE_now = dist.Field(name='KE_now')
+
 grad_pom0 = dist.VectorField(coords, name='grad_pom0', bases=basis.radial_basis)
 grad_s0 = dist.VectorField(coords, name='grad_s0', bases=basis.radial_basis)
 grad_ln_pom0 = dist.VectorField(coords, name='grad_ln_pom0', bases=basis.radial_basis)
@@ -160,8 +163,10 @@ nonlinear_HSE = d3.grad(P_full)/rho_full - ones*gamma*pom0*(grad_ln_rho0 + grad_
 
 E = 0.5*(grad_u + d3.trans(grad_u))
 sigma = 2*(E - (1/3)*div_u*eye)
-viscous_diffusion_L = nu*(d3.div(sigma) + d3.dot(sigma, grad_ln_rho0))
-viscous_diffusion_R = nu*d3.dot(sigma, d3.grad(ln_rho1))
+viscous_diffusion_L = 2*nu*d3.lap(u)
+viscous_diffusion_R = (1/rho_full)*d3.div(rho_full*nu*sigma) - viscous_diffusion_L
+#viscous_diffusion_L = nu*(d3.div(sigma) + d3.dot(sigma, grad_ln_rho0))
+#viscous_diffusion_R = nu*d3.dot(sigma, d3.grad(ln_rho1))
 VH = 2 * nu * (d3.trace(d3.dot(E,E)) - (1/3)*div_u*div_u)
 
 u_squared = u@u
@@ -194,14 +199,15 @@ tau_production = -momentum @ lift(tau_u1) - (P_full/R) * lift(tau_s1)
 
 PE_production = -(d3.div(g_phi*momentum) + momentum@g)
 KE_production = momentum@(viscous_diffusion_L + viscous_diffusion_R - nonlinear_HSE - linear_HSE - lift(tau_u1)) - d3.div(u*KE)
-IE_production = thermal_diff_production + Q_production - P_full*d3.div(u) - (P_full/R)*lift(tau_s1) - d3.div(u*IE) + rho_full*VH
+IE_production = thermal_diff_production + Q_production - P_full*d3.div(u) - d3.div(u*IE) + rho_full*VH  + momentum@lift(tau_u1)
+#IE_production = thermal_diff_production + Q_production - P_full*d3.div(u) - (P_full/R)*lift(tau_s1) - d3.div(u*IE) + rho_full*VH 
 E_production = PE_production + KE_production + IE_production
 
 
 # Problem
 problem = d3.IVP([ln_rho1, s1, u, tau_s1, tau_u1, PE_int, KE_int, IE_int], namespace=locals())
 problem.add_equation("dt(ln_rho1) + div_u + u@grad_ln_rho0 = -u@grad(ln_rho1)")
-problem.add_equation("dt(s1) + dot(u, grad_s0) - thermal_diffusion_L + lift(tau_s1) = - u@grad(s1) + thermal_diffusion_R + (R/P_full)*(Q + rho_full*VH)")
+problem.add_equation("dt(s1) + dot(u, grad_s0) - thermal_diffusion_L + lift(tau_s1) = - u@grad(s1) + thermal_diffusion_R + (R/P_full)*(Q + rho_full*VH) + lift(tau_s1) + momentum@lift(tau_u1)*(R/P_full)")
 problem.add_equation("dt(u) - viscous_diffusion_L + linear_HSE + lift(tau_u1) = - u@grad(u) - nonlinear_HSE + viscous_diffusion_R")
 
 #problem.add_equation("s1(r=Ro) = 0")
@@ -244,6 +250,7 @@ scalars.add_task(integ(TE), name='TE')
 scalars.add_task(integ(IE1), name='IE1')
 scalars.add_task(integ(PE1), name='PE1')
 scalars.add_task(integ(FE), name='FE')
+scalars.add_task(integ(KE) + integ(IE1) + integ(PE1), name='FE_pieces')
 scalars.add_task(integ(EOS_goodness), name='EOS')
 scalars.add_task(integ(viscous_production), name='prod_visc')
 scalars.add_task(integ(thermal_diff_production), name='prod_thermdiff')
@@ -295,17 +302,26 @@ try:
     while solver.proceed:
         timestep = CFL.compute_timestep()
         solver.step(timestep)
+
+        #Possible that we can add a source term to fix this....
+        KE_last['g'] = KE_now['g']
+        KE_now['g'] = integ(KE).evaluate()['g']
+        delta_KE = KE_now['g'] - KE_last['g']
+        expected_delta_KE = integ(KE_production).evaluate()['g']*timestep
+
+
+        # I think this points towards a problem with energy conservation from viscous diffusion tensor stuff...
         if (solver.iteration-1) % 1 == 0:
             max_Re = flow.max('Re')
-            logger.info('Iteration=%i, Time=%e, dt=%e, max(Re)=%e, EOS=%e, FE_int=%e' %(solver.iteration, solver.sim_time, timestep, max_Re, flow.max("EOS"), flow.max("FE_int")))
             FE = flow.max("FE") #flow.max("PE1") + flow.max("IE1") + flow.max("KE")
-            logger.info("FE: {:.3e}, KE: {:.3e}, PE1: {:.3e}, IE1: {:.3e}".format(FE, flow.max("KE"), flow.max("PE1"), flow.max("IE1")))
-            total_production = integ(E_production).evaluate()['g'].min()
-            logger.info("Production ({:.3e}) - visc: {:.3e}, thermdiff: {:.3e}, Q: {:.3e}, PdV: {:.3e}, tau: {:.3e}".format(total_production, flow.max("prod_visc"), flow.max("prod_thermdiff"), flow.max("prod_Q"), flow.max("prod_PdV"), flow.max("prod_tau")))
-            logger.info("PE {:.3e} (diff {:.3e}), KE {:.3e} (diff {:.3e}), IE {:.3e} (diff {:.3e})".\
-                        format(PE_int['g'].min() - PE_int0, PE_int['g'].min() - flow.max("PE"), \
-                               KE_int['g'].min(), KE_int['g'].min() - flow.max("KE"), \
-                               IE_int['g'].min() - IE_int0, IE_int['g'].min() - flow.max("IE")))
+            logger.info('Iteration=%i, Time=%e, dt=%e, max(Re)=%e, EOS=%e, FE_int=%e / FE=%e' %(solver.iteration, solver.sim_time, timestep, max_Re, flow.max("EOS"), flow.max("FE_int"), FE))
+#            logger.info("FE: {:.3e}, KE: {:.3e}, PE1: {:.3e}, IE1: {:.3e}".format(FE, flow.max("KE"), flow.max("PE1"), flow.max("IE1")))
+#            total_production = integ(E_production).evaluate()['g'].min()
+#            logger.info("Production ({:.3e}) - visc: {:.3e}, thermdiff: {:.3e}, Q: {:.3e}, PdV: {:.3e}, tau: {:.3e}".format(total_production, flow.max("prod_visc"), flow.max("prod_thermdiff"), flow.max("prod_Q"), flow.max("prod_PdV"), flow.max("prod_tau")))
+#            logger.info("PE {:.3e} (diff {:.3e}), KE {:.3e} (diff {:.3e}), IE {:.3e} (diff {:.3e})".\
+#                        format(PE_int['g'].min() - PE_int0, PE_int['g'].min() - flow.max("PE"), \
+#                               KE_int['g'].min(), KE_int['g'].min() - flow.max("KE"), \
+#                               IE_int['g'].min() - IE_int0, IE_int['g'].min() - flow.max("IE")))
         if np.isnan(max_Re):
             raise ValueError("Re is NaN")
 except:
