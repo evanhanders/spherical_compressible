@@ -50,9 +50,11 @@ def ball_HSE_BVP(N2_func, g_func, Lconv_func,  Nr=Nr, Ro=Ro, gamma=5/3, R=1):
     ln_rho = dist.Field(name='ln_rho', bases=basis)
     s = dist.Field(name='s', bases=basis)
     Q = dist.Field(name='Q', bases=basis)
+    g_phi = dist.Field(name='g_phi', bases=basis)
     tau_s = dist.Field(name='tau_s', bases=s2_basis)
     tau_Q = dist.Field(name='tau_Q', bases=s2_basis)
     tau_rho = dist.Field(name='tau_rho', bases=s2_basis)
+    tau_g_phi = dist.Field(name='tau_g_phi', bases=s2_basis)
     N2_input = dist.Field(name='N2_input', bases=basis)
 
 
@@ -88,13 +90,15 @@ def ball_HSE_BVP(N2_func, g_func, Lconv_func,  Nr=Nr, Ro=Ro, gamma=5/3, R=1):
     g['g'][2] = g_func(r)
 
     # Problem
-    problem = d3.NLBVP([ln_rho, s, Q, tau_s, tau_rho], namespace=locals())
+    problem = d3.NLBVP([ln_rho, s, Q, g_phi, tau_s, tau_rho, tau_g_phi], namespace=locals())
     problem.add_equation("grad(s)/Cp + grad(ln_rho) + rvec*lift(tau_rho) = g/(gamma*pomega)") #hydrostatic equilibrium
     problem.add_equation("N2 + lift(tau_s) = N2_input")
-    problem.add_equation("Q = div(Fconv)") 
+    problem.add_equation("Q = div(Fconv)")
+    problem.add_equation("g*ones + grad(g_phi) + rvec*lift(tau_g_phi) = 0")
 
     problem.add_equation("ln_rho(r=Ro) = 0")
     problem.add_equation("ln_pomega(r=Ro) = log(R)")
+    problem.add_equation("g_phi(r=Ro) = 0")
 
     ncc_cutoff=1e-10
     tolerance=1e-10
@@ -134,6 +138,7 @@ def ball_HSE_BVP(N2_func, g_func, Lconv_func,  Nr=Nr, Ro=Ro, gamma=5/3, R=1):
     atmosphere = dict()
     atmosphere['r'] = r
     atmosphere['g'] = np.copy(g['g'])
+    atmosphere['s0'] = np.copy(s['g'])
     atmosphere['grad_s0'] = np.copy(d3.grad(s).evaluate()['g'])
     atmosphere['grad_pom0'] = np.copy(d3.grad(pomega).evaluate()['g'])
     atmosphere['pom0'] = np.copy(pomega.evaluate()['g'])
@@ -142,6 +147,7 @@ def ball_HSE_BVP(N2_func, g_func, Lconv_func,  Nr=Nr, Ro=Ro, gamma=5/3, R=1):
     atmosphere['rho0'] = np.copy(np.exp(ln_rho).evaluate()['g'])
     atmosphere['ln_rho0'] = np.copy(ln_rho['g'])
     atmosphere['Q'] = np.copy(Q['g'])
+    atmosphere['g_phi'] = np.copy(g_phi['g'])
     return atmosphere
 
 
