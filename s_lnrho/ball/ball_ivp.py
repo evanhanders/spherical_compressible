@@ -87,7 +87,7 @@ g_phi = dist.Field(name='g_phi', bases=basis.radial_basis)
 Q = dist.Field(name='Q', bases=basis)
 ones = dist.Field(name='ones', bases=basis)
 ones['g'] = 1
-eye = dist.TensorField(coords, name='I')
+eye = dist.TensorField(coords, name='I', bases=basis.radial_basis)
 eye['g'] = 0
 for i in range(3):
     eye['g'][i,i] = 1
@@ -163,10 +163,8 @@ nonlinear_HSE = d3.grad(P_full)/rho_full - ones*gamma*pom0*(grad_ln_rho0 + grad_
 
 E = 0.5*(grad_u + d3.trans(grad_u))
 sigma = 2*(E - (1/3)*div_u*eye)
-viscous_diffusion_L = 2*nu*d3.lap(u)
-viscous_diffusion_R = (1/rho_full)*d3.div(rho_full*nu*sigma) - viscous_diffusion_L
-#viscous_diffusion_L = nu*(d3.div(sigma) + d3.dot(sigma, grad_ln_rho0))
-#viscous_diffusion_R = nu*d3.dot(sigma, d3.grad(ln_rho1))
+viscous_diffusion_L = nu*(d3.div(sigma) + d3.dot(sigma, grad_ln_rho0)) #truth
+viscous_diffusion_R = nu*d3.dot(sigma, d3.grad(ln_rho1)) #truth
 VH = 2 * nu * (d3.trace(d3.dot(E,E)) - (1/3)*div_u*div_u)
 
 u_squared = u@u
